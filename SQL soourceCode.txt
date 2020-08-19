@@ -1,0 +1,212 @@
+以下为数据库代码文件，数据库名为PEACS。
+连接方式为本地连接：127.0.0.1
+登录账户为：sa
+密码为：1021
+以上内容为我的参数，运行需进行调整。
+create database PEACS;
+
+--学生表
+create table Student(
+	Sno varchar(16) primary key not null,
+	Sname varchar(32) not null,
+	Sclass varchar(16) not null,
+	Sage int,
+	Ssex varchar(16) check(Ssex in ('male', 'female')),
+	Sdept varchar(32),
+	Scol varchar(32),
+	foreign key (Sclass) references Class
+);
+--班级表
+create table Class(
+	Cclass varchar(16) primary key not null,
+	Cnumber int not null,
+	CMonitor varchar(32),
+	CLearning varchar(32)
+);
+--实验表
+create table Experiment(
+	Eno varchar(8) unique not null,
+	Ename varchar(64) unique not null,
+	Eans_pass varchar(128) not null,
+	Eans_execellence varchar(128) not null,
+	EisFinish bit,
+	Epass int,
+	Eexcellence int,
+	EnotPass int,
+	primary key(Eno)
+);
+--成绩表
+create table Grade(
+	Gid varchar(8) primary key,
+	Sno varchar(16) not null,
+	Eno varchar(8) not null,
+	grade int,
+	foreign key (Sno) references Student(Sno),
+	foreign key (Eno) references Experiment
+);
+--学生菜单表
+create table Stu_Menu(
+	mu_id varchar(10) primary key not null,
+	mu_name varchar(50),
+	parent_id varchar(10),
+	tv_folder varchar(4),
+	tv_file varchar(10),
+	order_no varchar(10),
+	ins_no varchar(12),
+	ins_date datetime,
+	ins_ip varchar(15),
+	up_no varchar(12),
+	up_date datetime,
+	up_ip varchar(15)
+);
+--实验菜单表
+create table Exper_Menu(
+	mu_id varchar(8) primary key not null,
+	mu_name varchar(64),
+	parent_id varchar(8),
+	tv_folder varchar(4),
+	tv_file varchar(8),
+	order_no int identity(1, 1)
+);
+--计算学生人数触发器
+create trigger CalculateNumber
+on Student
+after Insert,delete,update
+as begin
+	declare @num int
+	declare @SclaDelete varchar(16)
+	declare @SclaInsert varchar(16)
+
+	select @SclaDelete = Sclass
+	from deleted
+
+	select @SclaInsert = Sclass
+	from Inserted
+
+	update Class set Cnumber = Cnumber + 1 where Cclass = @SclaInsert
+	update Class set Cnumber = Cnumber - 1 where Cclass = @SclaDelete
+
+end;
+--开始实验触发器，当开始实验是会把实验表中的isFinish设置为true，此时触发器生效
+create trigger StartExper
+on Experiment
+after update
+as 
+	if update(EisFinish)
+begin
+	
+	declare @pass int
+	declare @excellent int
+	declare @notpass int
+	declare @Eno varchar(8)
+
+	select @Eno = Eno
+	from deleted
+
+	select @pass = count(grade)
+	from Grade
+	where grade >= 60 and grade < 80 and Eno = @Eno;
+
+	select @excellent = count(grade)
+	from Grade
+	where grade >= 80 and Eno = @Eno;
+
+	select @notpass = count(grade)
+	from Grade
+	where grade < 60 and Eno = @Eno;
+
+	update Experiment set Epass = @pass where Eno = @Eno and EisFinish = 1;
+	update Experiment set Eexcellence = @excellent where Eno = @Eno and EisFinish = 1;
+	update Experiment set ENotPass = @notpass where Eno = @Eno and EisFinish = 1;
+
+end;
+
+--插入班级触发器，当插入班级时，需要同步把触发器更新至终端显示菜单
+create trigger InsertClass
+on Class
+after Insert
+as begin
+	declare @classInsert varchar(16)
+
+	select @classInsert = Cclass
+	from Inserted
+
+	insert into Stu_Menu values(@classInsert, @classInsert + '班', null, null, @classInsert, null, null, null, null, null, null, null);
+
+end;
+--删除班级触发器，当删除班级时，需要同步把触发器更新至终端显示菜单
+create trigger DeleteClass
+on Class
+after delete
+as begin
+
+	declare @classDelete varchar(16)
+
+	select @classDelete = Cclass
+	from deleted
+
+	delete from Stu_Menu where mu_id = @classDelete
+
+end;
+--插入实验触发器
+create trigger InsertExper
+on Experiment
+after Insert
+as begin
+	declare @InsertName varchar(64)
+	declare @DeleteName varchar(64)
+	declare @InsertEno varchar(8)
+	declare @DeleteEno varchar(8)
+
+	select @InsertEno = Eno, @InsertName = Ename from inserted
+
+	insert into Exper_Menu values(@InsertEno, @InsertName, null, null, @InsertEno, null, null, null, null, null, null, null);
+
+end;
+
+--删除实验触发器
+create trigger DeleteExper
+on Experiment
+instead of delete
+as begin
+	declare @InsertName varchar(64)
+	declare @DeleteName varchar(64)
+	declare @InsertEno varchar(8)
+	declare @DeleteEno varchar(8)
+
+	select @DeleteEno = Eno, @DeleteName = Ename from deleted
+
+	delete from Exper_Menu where mu_id = @DeleteEno
+	delete from Experiment where Eno = @DeleteEno and Ename = @DeleteName
+
+end;
+--修改Ename触发器
+create trigger UpdateEnameExper
+on Experiment
+after Update
+as 
+	if update(Ename)
+begin
+	declare @Eno varchar(8)
+	declare @Name varchar(64)
+
+	select @Name = Ename from inserted
+	select @Eno = Eno from inserted
+
+	update Exper_Menu set mu_name = @Name where tv_file = @Eno
+
+end;
+--修改Eno触发器
+create trigger UpdateEnoExper
+on Experiment
+after Update
+as 
+	if update(Eno)
+begin
+	declare @InsertEno varchar(8)
+
+	select @InsertEno = Eno from inserted
+
+	update Exper_Menu set mu_id = @InsertEno where tv_file = @InsertEno
+
+end;
